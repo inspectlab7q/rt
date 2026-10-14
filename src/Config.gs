@@ -9,6 +9,8 @@
  *   PHOTO_FOLDER_ID           … setup() が自動で作成・保存します
  *   WEBHOOK_TOKEN             … setup() が自動で作成・保存します
  *   GROUP_ID                  … Bot をグループに招待すると自動で保存されます
+ *   LINE_LOGIN_CHANNEL_ID     … LINE ログインのチャネル ID（ポータルのログインに使う・必須）
+ *   LINE_LOGIN_CHANNEL_SECRET … LINE ログインのチャネルシークレット（必須）
  */
 const CONFIG = {
   TIMEZONE: 'Asia/Tokyo',
@@ -26,6 +28,9 @@ const CONFIG = {
   RACE_KEYWORDS: /大会|記録会|競技会|選手権|マラソン|駅伝|ロードレース|リレー/,
   // 大会を作るとき、エントリー締切を何日前に自動で入れるか
   DEADLINE_DAYS_BEFORE: 10,
+
+  // ポータルを使っている人が、まだクラブのLINEグループにいるかを何時間ごとに確かめ直すか
+  MEMBER_RECHECK_HOURS: 12,
 
   // 休みの連絡を、役員にLINEで個別に知らせるか（1件につき役員の人数分の通数を使います）
   ABSENCE_PUSH_TO_ADMINS: true,

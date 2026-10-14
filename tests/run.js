@@ -15,13 +15,12 @@ function setupClub() {
   gas.calendar.add({ title: '通常練習', start: jst('2026-10-15T17:00:00'), end: jst('2026-10-15T18:30:00'), location: '第二小学校' });
   gas.calendar.add({ title: '通常練習', start: jst('2026-10-17T09:00:00'), end: jst('2026-10-17T11:00:00'), location: '市民グラウンド' });
   gas.calendar.add({ title: '秋季記録会', start: jst('2026-11-01T00:00:00'), end: jst('2026-11-02T00:00:00'), allDay: true, location: '市営陸上競技場' });
-  gas.profiles.U1 = '山田';
-  gas.profiles.U2 = '鈴木';
+  Object.assign(gas.profiles, { U1: '山田', U2: '鈴木', U3: '佐藤', U4: '山田（父）' });
+  ['U1', 'U2', 'U3', 'U4'].forEach((u) => gas.members.add(u));
   return gas;
 }
 const dm = (userId) => ({ type: 'user', userId });
 const group = (userId) => ({ type: 'group', groupId: 'G1', userId });
-const keyOf = (text) => (text.match(/\?k=([A-Za-z0-9]+)/) || [])[1];
 
 test('コマンド: 1語目が完全一致したときだけ反応', () => {
   const gas = createGas();
@@ -44,18 +43,42 @@ test('対象学年の判定', () => {
   assert.strictEqual(gas.run("inTarget_('全員', 1)"), true);
 });
 
-test('Botで登録して、ポータルのリンクは1対1でだけ渡す', () => {
+test('LINEログイン: グループのメンバーだけが入れる', () => {
+  const gas = setupClub();
+  gas.profiles.X9 = '部外者';
+  const ok = gas.login('U1');
+  assert.ok(ok.key && ok.key.length === 32, ok.error);
+  assert.strictEqual(gas.login('U1').key, ok.key, '同じ人には同じキー');
+  const ng = gas.login('X9');
+  assert.strictEqual(ng.key, null);
+  assert.ok(ng.error.includes('メンバーだけ'), ng.error);
+  assert.ok(!gas.rows('家族').some((f) => f.userId === 'X9'), 'メンバーでない人は記録しない');
+  const html = gas.ctx.doGet({ parameter: {} }).getContent();
+  const state = html.match(/state=([A-Za-z0-9]+)/)[1];
+  assert.strictEqual(JSON.parse(gas.ctx.doGet({ parameter: { code: 'login:U2', state } }).getContent().match(/var KEY = (".*?");/)[1]), gas.rows('家族').find((f) => f.userId === 'U2')['ポータルキー']);
+  const reused = gas.ctx.doGet({ parameter: { code: 'login:U2', state } }).getContent();
+  assert.ok(reused.includes('有効期限'), '同じ state は2回使えない');
+  assert.ok(gas.ctx.doGet({ parameter: { code: 'login:U2', state: 'forged' } }).getContent().includes('有効期限'));
+  assert.throws(() => gas.ctx.api('A'.repeat(32), 'bootstrap'), /ログインが切れ/);
+});
+
+test('グループを抜けた人は、確認し直したときに使えなくなる', () => {
+  const gas = setupClub();
+  const k = gas.login('U2').key;
+  assert.ok(gas.ctx.api(k, 'bootstrap'));
+  gas.members.delete('U2');
+  assert.ok(gas.ctx.api(k, 'bootstrap'), '確認したばかりなので、しばらくは通る');
+  gas.sheet('家族').data.forEach((r) => { if (r[0] === 'U2') r[5] = '2026-10-13 09:00:00'; });
+  assert.throws(() => gas.ctx.api(k, 'bootstrap'), /グループのメンバーではない/);
+});
+
+test('Bot: 登録とポータルのリンク（グループでも出してよい共通リンク）', () => {
   const gas = setupClub();
   const r1 = gas.line(dm('U1'), '登録 山田たろう 3年 山田はなこ 1年');
   assert.ok(r1.includes('山田たろう（3年）'), r1);
-  const inGroup = gas.line(group('U1'), 'ポータル');
-  assert.ok(!keyOf(inGroup), 'グループに個人リンクを出さない');
-  const k1 = keyOf(gas.line(dm('U1'), 'ポータル'));
-  assert.ok(k1 && k1.length === 32);
-  assert.strictEqual(keyOf(gas.line(dm('U1'), 'ポータル')), k1, '同じリンクを返す');
-  const k2 = keyOf(gas.line(dm('U1'), 'ポータル 再発行'));
-  assert.ok(k2 && k2 !== k1, '再発行で変わる');
-  assert.throws(() => gas.ctx.api(k1, 'bootstrap'), /リンクが無効/);
+  const r2 = gas.line(group('U1'), 'ポータル');
+  assert.ok(r2.includes('https://script.google.com/macros/s/TEST/exec'), r2);
+  assert.ok(!/k=/.test(r2), '個人キーは出さない');
   const children = gas.rows('子ども');
   assert.deepStrictEqual(children.map((c) => [c['名前'], c['学年'], c['保護者userId']]), [['山田たろう', '3', 'U1'], ['山田はなこ', '1', 'U1']]);
 });
@@ -64,8 +87,8 @@ test('ポータル: 予定の取り込み・エントリー・締切・集金', 
   const gas = setupClub();
   gas.line(dm('U1'), '登録 山田たろう 3年');
   gas.line(dm('U2'), '登録 鈴木けんた 5年');
-  const kAdmin = keyOf(gas.line(dm('U1'), 'ポータル'));
-  const kParent = keyOf(gas.line(dm('U2'), 'ポータル'));
+  const kAdmin = gas.login('U1').key;
+  const kParent = gas.login('U2').key;
   gas.sheet('家族').data.forEach((r) => { if (r[0] === 'U1') r[3] = '○'; });
 
   let st = gas.ctx.api(kParent, 'bootstrap');
@@ -97,7 +120,7 @@ test('ポータル: 予定の取り込み・エントリー・締切・集金', 
 test('ポータル: 大会を新しく作るとカレンダーにも入る', () => {
   const gas = setupClub();
   gas.line(dm('U1'), '登録 山田たろう 3年');
-  const k = keyOf(gas.line(dm('U1'), 'ポータル'));
+  const k = gas.login('U1').key;
   gas.sheet('家族').data.forEach((r) => { if (r[0] === 'U1') r[3] = '○'; });
   const st = gas.ctx.api(k, 'saveRace', { title: '冬季ロードレース大会', date: '2026-11-22', place: '東中学校', races: ['2km'] });
   assert.ok(st.message.includes('保存'));
@@ -111,14 +134,14 @@ test('ポータル: 大会を新しく作るとカレンダーにも入る', () 
   assert.strictEqual(gas.rows('予定').filter((r) => r['タイトル'] === '冬季ロードレース大会').length, 1, '同期しても重複しない');
 });
 
-test('ポータル: 休みの連絡は役員に届き、他の保護者には見えない', () => {
+test('ポータル: 休みの連絡は役員に届き、理由は本人と役員だけに見える', () => {
   const gas = setupClub();
   gas.line(dm('U1'), '登録 山田たろう 3年');
   gas.line(dm('U2'), '登録 鈴木けんた 5年');
   gas.line(dm('U3'), '登録 佐藤さくら 2年');
-  const kAdmin = keyOf(gas.line(dm('U1'), 'ポータル'));
-  const kParent = keyOf(gas.line(dm('U2'), 'ポータル'));
-  const kOther = keyOf(gas.line(dm('U3'), 'ポータル'));
+  const kAdmin = gas.login('U1').key;
+  const kParent = gas.login('U2').key;
+  const kOther = gas.login('U3').key;
   gas.sheet('家族').data.forEach((r) => { if (r[0] === 'U1') r[3] = '○'; });
 
   assert.throws(() => gas.ctx.api(kParent, 'reportAbsence', { child: '鈴木けんた', date: '2026-10-01', reason: '体調不良' }), /過ぎた日/);
@@ -127,7 +150,11 @@ test('ポータル: 休みの連絡は役員に届き、他の保護者には見
   const push = gas.pushes().pop();
   assert.strictEqual(push.payload.to, 'U1');
   assert.ok(push.payload.messages[0].text.includes('鈴木けんた'));
-  assert.strictEqual(gas.ctx.api(kOther, 'bootstrap').absences.length, 0, '他の家庭の休みは見えない');
+  const seen = gas.ctx.api(kOther, 'bootstrap').absences;
+  assert.strictEqual(seen.length, 1, 'だれが休みかはメンバー全員に見える');
+  assert.strictEqual(seen[0].child, '鈴木けんた');
+  assert.strictEqual(seen[0].reason + seen[0].memo + seen[0].by, '', '理由・ひとこと・連絡者は本人と役員だけ');
+  assert.strictEqual(gas.ctx.api(kAdmin, 'bootstrap').absences[0].memo, '通院');
 
   st = gas.ctx.api(kAdmin, 'ackAbsence', { id: st.absences[0].id });
   assert.strictEqual(st.absences[0].ack, true);
@@ -140,7 +167,7 @@ test('ポータル: わが家で子どもを直す・両親で同じ子を登録
   const gas = setupClub();
   gas.line(dm('U1'), '登録 山田たろう');
   gas.line(dm('U4'), '登録 山田たろう 3年');
-  const k = keyOf(gas.line(dm('U1'), 'ポータル'));
+  const k = gas.login('U1').key;
   assert.strictEqual(gas.rows('子ども').length, 1);
   assert.strictEqual(gas.rows('子ども')[0]['保護者userId'], 'U1,U4');
   let st = gas.ctx.api(k, 'saveChildren', { children: [{ name: '山田たろう', grade: 4 }, { name: '山田はなこ', grade: 1 }] });
@@ -149,12 +176,12 @@ test('ポータル: わが家で子どもを直す・両親で同じ子を登録
   assert.deepStrictEqual(st.kids.map((c) => c.name), ['山田たろう', '山田はなこ'], 'もう一人の親が登録しているので残る');
 });
 
-test('ポータル画面: 個人キーだけを埋め込む', () => {
+test('ポータル画面: URLに付けたキーでは開けない（ログインが必要）', () => {
   const gas = setupClub();
-  const html = gas.ctx.doGet({ parameter: { k: 'abc"</script><script>alert(1)' } }).getContent();
-  assert.ok(html.includes('var KEY = "";'), '不正なキーは空にする');
-  const ok = gas.ctx.doGet({ parameter: { k: 'A'.repeat(32) } }).getContent();
-  assert.ok(ok.includes('var KEY = "' + 'A'.repeat(32) + '";'));
+  const k = gas.login('U1').key;
+  const html = gas.ctx.doGet({ parameter: { k: k } }).getContent();
+  assert.ok(html.includes('var KEY = "";'));
+  assert.ok(html.includes('access.line.me/oauth2/v2.1/authorize'));
 });
 
 test('管理用の関数はWebアプリからは動かない', () => {

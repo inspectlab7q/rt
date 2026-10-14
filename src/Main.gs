@@ -1,10 +1,25 @@
 /**
- * ポータルの画面を返す。?k= に保護者ごとの個人キーが付いてくる。
+ * ポータルの画面を返す。
+ * LINE ログインから戻ってきたとき（?code=）は、グループのメンバーか確かめてからキーを渡す。
+ * それ以外は、ブラウザに保存したキーで開くか、ログインボタンを出す。
  */
 function doGet(e) {
-  const key = (e && e.parameter && e.parameter.k) || '';
+  const p = (e && e.parameter) || {};
+  let key = '';
+  let error = '';
+  if (p.code) {
+    const r = handleLoginCallback_(p.code, p.state);
+    key = r.key || '';
+    error = r.error || '';
+  } else if (p.error) {
+    error = 'LINEログインがキャンセルされました。';
+  }
   const t = HtmlService.createTemplateFromFile('Portal');
-  t.key = /^[A-Za-z0-9]{16,64}$/.test(key) ? key : '';
+  t.key = key;
+  t.error = error;
+  t.login = loginUrl_();
+  t.home = ScriptApp.getService().getUrl();
+  t.club = CONFIG.CLUB_NAME;
   return t.evaluate()
     .setTitle(CONFIG.CLUB_NAME + ' ポータル')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');

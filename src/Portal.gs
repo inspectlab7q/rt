@@ -1,11 +1,12 @@
 /**
  * ポータル（Webアプリ）のサーバー側。
  * 画面からは google.script.run.api(key, action, payload) だけを呼ぶ。
- * key は保護者ごとの個人キーで、Bot との1対1トークで「ポータル」と送ると届く。
+ * key は LINE ログイン（Login.gs）でグループのメンバーと確認できた人に発行するキー。
  */
 function api(key, action, payload) {
   const family = findFamilyByKey_(key);
-  if (!family) throw new Error('リンクが無効です。Botとの1対1トークで「ポータル」と送って、新しいリンクを受け取ってください。');
+  if (!family) throw new Error('ログインが切れました。もう一度「LINEでログイン」を押してください。');
+  ensureMember_(family);
   const handler = API_ACTIONS[action];
   if (!handler) throw new Error('不明な操作です: ' + action);
   if (handler.admin && !isAdmin_(family)) throw new Error('この操作は役員だけができます。');
@@ -76,10 +77,13 @@ function buildState_(ctx) {
     .filter((x) => raceKeys[x.eventKey])
     .map((x) => ({ key: x.eventKey, child: x['子ども'], join: x['回答'], races: splitNames_(x['種目']), paid: x['集金'] === '済', by: x['更新者'] }));
 
+  // だれが休みかはメンバー全員に見せる（いままでのグループのトークと同じ）。理由とひとことは本人と役員だけ
   const absences = readRows_(SHEETS.ABSENCES)
     .filter((a) => a.id && a['日付'] >= addDays_(today, -7))
-    .filter((a) => ctx.admin || a['連絡者userId'] === ctx.userId)
-    .map((a) => ({ id: a.id, date: a['日付'], child: a['子ども'], reason: a['理由'], memo: a['メモ'], by: a['連絡者'], mine: a['連絡者userId'] === ctx.userId, ack: a['確認'] === '済', ackBy: a['確認者'] }))
+    .map((a) => {
+      const mine = a['連絡者userId'] === ctx.userId, full = mine || ctx.admin;
+      return { id: a.id, date: a['日付'], child: a['子ども'], reason: full ? a['理由'] : '', memo: full ? a['メモ'] : '', by: full ? a['連絡者'] : '', mine: mine, ack: a['確認'] === '済', ackBy: full ? a['確認者'] : '' };
+    })
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 
   const notices = readRows_(SHEETS.NOTICES)
@@ -263,9 +267,4 @@ function deleteNoticeAction_(ctx, p) {
     if (n) clearRow_(SHEETS.NOTICES, n);
   });
   return 'お知らせを消しました';
-}
-
-/** ポータルのURL（個人キー付き） */
-function portalUrl_(key) {
-  return ScriptApp.getService().getUrl() + '?k=' + key;
 }

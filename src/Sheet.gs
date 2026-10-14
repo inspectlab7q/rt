@@ -3,7 +3,7 @@
  * どのシートも1行目が見出しで、2行目以降がデータ。値はすべて文字列で保存する。
  */
 const SHEETS = {
-  FAMILIES: { name: '家族', headers: ['userId', '表示名', 'ポータルキー', '役員', '更新日時'] },
+  FAMILIES: { name: '家族', headers: ['userId', '表示名', 'ポータルキー', '役員', '更新日時', 'グループ確認'] },
   CHILDREN: { name: '子ども', headers: ['名前', '学年', '保護者userId', '更新日時'] },
   EVENTS: { name: '予定', headers: ['eventKey', '日付', '開始', '終了', 'タイトル', '場所', 'カレンダーID', '種別', '状態', '更新日時'] },
   RACES: { name: '大会', headers: ['eventKey', '種別', '対象', '参加費', '締切', '集合時刻', '集合場所', '種目', '持ち物', '注意', '更新日時'] },
@@ -122,7 +122,7 @@ function ensureFamily_(userId, displayName) {
   });
 }
 
-/** ポータル用の個人キー。renew が true なら作り直す（リンクが漏れたとき用） */
+/** ポータルにログインした人のキー（ブラウザに保存して、次からはログインを省く）。renew が true なら作り直す */
 function portalKeyFor_(userId, displayName, renew) {
   const f = ensureFamily_(userId, displayName);
   if (f['ポータルキー'] && !renew) return f['ポータルキー'];

@@ -3,11 +3,8 @@ function helpText_() {
   return [
     '🏃 ' + CONFIG.CLUB_NAME + ' Botの使い方',
     '',
-    '【はじめに】Botを友だち追加して、1対1のトークで次を送ってください',
-    '登録 名前 学年 … お子さんを登録（例：登録 山田たろう 3年 山田はなこ 1年）',
-    'ポータル … 予定・大会のエントリー・休みの連絡ができる、あなた専用のページのリンク',
-    '',
-    '【グループでも使えます】',
+    'ポータル … 予定・大会のエントリー・休みの連絡ができるページのリンク（グループのメンバーだけが見られます）',
+    '登録 名前 学年 … お子さんを登録（例：登録 山田たろう 3年 山田はなこ 1年）。ポータルの「わが家」からもできます',
     '結果 種目 記録 … レース結果を記録（例：結果 100m 15.2秒）',
     '記録 … お子さんの記録一覧',
     '写真 … 保存した写真フォルダのリンク',
@@ -48,9 +45,9 @@ function handleText_(ev) {
     case 'register':
       return handleRegister_(ev, cmd.args);
     case 'portal':
-      return handlePortal_(ev, cmd.args);
+      return handlePortal_(ev);
     case 'portalHint':
-      return reply_(ev.replyToken, [text_('予定・大会のエントリー・休みの連絡は、ポータルからできます。\nBotとの1対1のトークで「ポータル」と送ると、あなた専用のリンクが届きます。')]);
+      return reply_(ev.replyToken, [text_('予定・大会のエントリー・休みの連絡は、ポータルからできます。\n' + portalUrl_())]);
     case 'result':
       return handleResultCommand_(ev, cmd.args);
     case 'records':
@@ -78,24 +75,15 @@ function handleRegister_(ev, args) {
   const noGrade = list.some((c) => !c.grade);
   reply_(ev.replyToken, [
     text_('登録しました：' + list.map((c) => c.name + (c.grade ? '（' + c.grade + '年）' : '')).join('、') + (noGrade ? '\n学年はポータルの「わが家」から入れられます。' : '') +
-      (ev.source.type === 'user' ? '\n続けて「ポータル」と送ると、専用ページのリンクが届きます。' : '')),
+      '\nポータル：' + portalUrl_()),
   ]);
 }
 
 /**
- * 個人リンクはグループに出すと他の人にも使われてしまうので、1対1のトークでだけ返す。
- * 「ポータル 再発行」でリンクを作り直せる（前のリンクは使えなくなる）。
+ * ポータルのリンクはみんな同じ。開くと LINE ログインがあり、グループのメンバーだけが入れるので、グループに出してよい。
  */
-function handlePortal_(ev, args) {
-  if (ev.source.type !== 'user') {
-    return reply_(ev.replyToken, [text_('ポータルのリンクは、あなた専用です。\nBotを友だち追加して、1対1のトークで「ポータル」と送ってください。')]);
-  }
-  const renew = /再発行|新しく|作り直/.test(args);
-  const key = portalKeyFor_(ev.source.userId, getDisplayName_(ev.source), renew);
-  const hasChildren = childrenOf_(ev.source.userId).length > 0;
+function handlePortal_(ev) {
   reply_(ev.replyToken, [
-    text_((renew ? '新しいリンクを作りました。前のリンクは使えなくなりました。\n\n' : '') +
-      '🏃 ' + CONFIG.CLUB_NAME + ' ポータル（あなた専用）\n' + portalUrl_(key) +
-      '\n\n※このリンクは他の人に教えないでください。' + (hasChildren ? '' : '\n※先に「登録 名前 学年」でお子さんを登録してください。')),
+    text_('🏃 ' + CONFIG.CLUB_NAME + ' ポータル\n' + portalUrl_() + '\n\n開くと「LINEでログイン」が出ます。' + CONFIG.CLUB_NAME + 'のLINEグループのメンバーだけが見られます。'),
   ]);
 }

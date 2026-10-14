@@ -134,6 +134,11 @@ form.f, .f { display: grid; gap: 8px; }
 <div class="busy" id="busy" hidden>保存しています…</div>
 <script>
 var KEY = <?!= JSON.stringify(key) ?>;
+var LOGIN_URL = <?!= JSON.stringify(login) ?>;
+var LOGIN_ERROR = <?!= JSON.stringify(error) ?>;
+var HOME_URL = <?!= JSON.stringify(home) ?>;
+var CLUB = <?!= JSON.stringify(club) ?>;
+document.getElementById('clubName').textContent = CLUB + ' ポータル';
 (function () {
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var ST = null;
@@ -173,9 +178,11 @@ var KEY = <?!= JSON.stringify(key) ?>;
       })
       .withFailureHandler(function (err) {
         document.getElementById('busy').hidden = true;
-        S.toast = '⚠ ' + String((err && err.message) || err).replace(/^(Exception|Error):\s*/, '');
+        var msg = String((err && err.message) || err).replace(/^(Exception|Error):\s*/, '');
+        if (/ログインが切れ|グループのメンバーではない/.test(msg)) { clearKey(); ST = null; showLogin(msg); return; }
+        S.toast = '⚠ ' + msg;
         S.toastErr = true;
-        if (!ST) { view.innerHTML = '<div class="card"><div class="big">ページを開けませんでした</div><div class="sub">' + esc(S.toast) + '</div></div>'; return; }
+        if (!ST) { view.innerHTML = '<div class="card"><div class="big">ページを開けませんでした</div><div class="sub">' + esc(msg) + '</div></div>'; return; }
         render();
       })
       .api(KEY, action, payload || {});
@@ -387,12 +394,13 @@ var KEY = <?!= JSON.stringify(key) ?>;
         '<button class="icon-btn" type="button" data-kdel="' + i + '" aria-label="この行を消す">×</button></div>';
     }).join('') + '<button class="btn small ghost" id="kidAdd" type="button" style="justify-self:start">＋ きょうだいを追加</button>' +
       '<button class="btn" type="submit">保存する</button><div class="hint">名前はクラブで呼ばれている書き方で。きょうだいやご両親で同じ子を登録しても大丈夫です。</div></form></section>' +
-      '<section class="card"><h2>このページのリンク</h2><div class="sub">このページはあなた専用です。リンクを他の人に教えないでください。もし漏れてしまったら、Botとの1対1トークで「ポータル 再発行」と送ると、新しいリンクに変わります。</div></section>';
+      '<section class="card"><h2>ログイン</h2><div class="sub">' + esc(ST.me.name) + 'さんのLINEでログインしています。このページは' + esc(ST.club) + 'のLINEグループのメンバーだけが見られます。家族のスマホで使うときは、ログアウトしてからそれぞれのLINEでログインしてください。</div><button class="btn small ghost" id="logout" type="button" style="justify-self:start">ログアウト</button></section>';
     view.innerHTML = h;
     view.querySelectorAll('[data-kn]').forEach(function (el) { el.addEventListener('input', function () { rows[+this.dataset.kn].name = this.value; }); });
     view.querySelectorAll('[data-kg]').forEach(function (el) { el.addEventListener('change', function () { rows[+this.dataset.kg].grade = +this.value; }); });
     on('[data-kdel]', function () { rows.splice(+this.dataset.kdel, 1); render(); });
     on('#kidAdd', function () { rows.push({ name: '', grade: 0 }); render(); });
+    on('#logout', function () { clearKey(); ST = null; showLogin('ログアウトしました。'); });
     document.getElementById('kidsForm').addEventListener('submit', function (e) {
       e.preventDefault();
       call('saveChildren', { children: rows.filter(function (c) { return c.name.trim(); }) }, function () { S.kidsDraft = null; });
@@ -524,7 +532,7 @@ var KEY = <?!= JSON.stringify(key) ?>;
     var det = e.detail || {};
     return '📣 ' + e.title + '（' + md(e.date) + '）\n' + (det.meetTime || det.meetPlace ? '集合 ' + [det.meetTime, e.place, det.meetPlace].filter(Boolean).join(' ') + '\n' : '') +
       (det.fee ? '参加費 ' + yen(det.fee) : '') + (det.deadline ? (det.fee ? '／' : '') + '締切 ' + md(det.deadline) : '') +
-      '\n参加・不参加と種目は、ポータルから回答してください。\n（ポータルのリンクは、Botとの1対1トークで「ポータル」と送ると届きます）';
+      '\n参加・不参加と種目は、ポータルから回答してください👇\n' + HOME_URL;
   }
   function copyBox(text) { return '<div class="copybox" id="copyText">' + esc(text) + '</div><button class="btn" id="copyBtn" type="button">LINEに貼る文章をコピー</button>'; }
   function bindCopy() {
@@ -553,7 +561,7 @@ var KEY = <?!= JSON.stringify(key) ?>;
       '<form class="f" id="nForm"><label>タイトル<input id="n-title" value="' + esc(N.title) + '"></label><label>本文<textarea id="n-body">' + esc(N.body) + '</textarea></label>' +
       '<label>関係する大会（なくてもOK）<select id="n-key"><option value="">なし</option>' + races.map(function (e) { return '<option value="' + e.key + '"' + (N.key === e.key ? ' selected' : '') + '>' + md(e.date) + ' ' + esc(e.title) + '</option>'; }).join('') + '</select></label>' +
       '<button class="btn" type="submit">ホームに載せる</button></form></section>';
-    if (N.saved) h += '<section class="card"><h2>LINEグループへのお知らせ</h2>' + copyBox('📢 ' + N.title + '\n' + N.body + '\n\n詳しくはポータルで（リンクはBotとの1対1トークで「ポータル」）') + '</section>';
+    if (N.saved) h += '<section class="card"><h2>LINEグループへのお知らせ</h2>' + copyBox('📢 ' + N.title + '\n' + N.body + '\n\n詳しくはポータルで👇\n' + HOME_URL) + '</section>';
     if (ST.notices.length) h += '<section class="card"><h2>載せているお知らせ</h2><div class="list">' + ST.notices.map(function (n) { return '<div class="between"><span>' + md(n.date) + ' ' + esc(n.title) + '</span><button class="btn small ghost" data-ndel="' + n.id + '" type="button">消す</button></div>'; }).join('') + '</div></section>';
     view.innerHTML = h;
     bindBack(); bindCopy();
@@ -610,11 +618,24 @@ var KEY = <?!= JSON.stringify(key) ?>;
   }
   document.getElementById('reload').addEventListener('click', function () { S.toast = ''; call('refresh'); });
 
-  if (!KEY) {
-    view.innerHTML = '<div class="card"><div class="big">このリンクでは開けません</div><div class="sub">Botを友だち追加して、1対1のトークで「ポータル」と送ると、あなた専用のリンクが届きます。</div></div>';
-  } else {
-    call('bootstrap');
+  // ---- ログイン ----
+  var STORE = 'clubPortalKey';
+  function saveKey(k) { try { localStorage.setItem(STORE, k); } catch (e) {} }
+  function loadKey() { try { return localStorage.getItem(STORE) || ''; } catch (e) { return ''; } }
+  function clearKey() { try { localStorage.removeItem(STORE); } catch (e) {} KEY = ''; }
+  function showLogin(msg) {
+    document.getElementById('nav').hidden = true;
+    document.getElementById('reload').hidden = true;
+    document.getElementById('me').textContent = '';
+    view.innerHTML = '<section class="card"><div class="big">ようこそ</div><div class="sub">このページは、' + esc(CLUB) + 'のLINEグループのメンバーだけが見られます。グループに入っているLINEアカウントでログインしてください。</div>' +
+      (msg ? '<div class="toast' + (/しました/.test(msg) ? '' : ' err') + '">' + esc(msg) + '</div>' : '') +
+      '<a class="btn" id="loginBtn" href="' + esc(LOGIN_URL) + '" target="_top" style="text-align:center;text-decoration:none;background:#06c755">LINEでログイン</a>' +
+      '<div class="hint">LINEアプリの中で開くと、ボタンを押すだけでログインできます。</div></section>';
   }
+  if (KEY) saveKey(KEY);
+  else KEY = loadKey();
+  if (KEY) call('bootstrap');   // ログイン直後、または前回のログインが残っているとき（再読み込みで期限切れの表示が出ても、保存したキーで開く）
+  else showLogin(LOGIN_ERROR);
 })();
 </script>
 </body>

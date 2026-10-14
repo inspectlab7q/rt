@@ -115,6 +115,7 @@ function createGas(options) {
   const fetches = [];
   const cache = {};
   const profiles = {};
+  const members = new Set();
 
   const ctx = {
     console: { log() {}, warn() {}, error: (...a) => ctx.__errors.push(a.join(' ')) },
@@ -126,7 +127,7 @@ function createGas(options) {
       create: (name) => { const id = 'ss' + Object.keys(spreadsheets).length; spreadsheets[id] = new Spreadsheet(id, name); return spreadsheets[id]; },
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    CacheService: { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; } }) },
+    CacheService: { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; } }) },
     Utilities: {
       formatDate,
       getUuid: () => crypto.randomUUID(),
@@ -137,11 +138,23 @@ function createGas(options) {
     CalendarApp: { getCalendarById: (id) => (id === props.CALENDAR_ID ? calendar : null) },
     UrlFetchApp: {
       fetch: (url, opt) => {
-        const payload = opt && opt.payload ? JSON.parse(opt.payload) : null;
+        const raw = opt && opt.payload;
+        const payload = typeof raw === 'string' ? JSON.parse(raw) : raw || null;
         fetches.push({ url, method: opt && opt.method, payload });
-        const m = url.match(/\/(?:profile|member)\/([^/]+)$/);
-        const body = m ? JSON.stringify({ displayName: profiles[m[1]] || '保護者' }) : '{}';
-        return { getResponseCode: () => 200, getContentText: () => body, getBlob: () => ({ getContentType: () => 'image/jpeg', setName() { return this; } }) };
+        const res = (code, obj) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(obj), getBlob: () => ({ getContentType: () => 'image/jpeg', setName() { return this; } }) });
+        // LINE ログイン：code は「login:<userId>」の形にしておく
+        if (/oauth2\/v2\.1\/token$/.test(url)) {
+          const m = String(payload.code).match(/^login:(.+)$/);
+          return m ? res(200, { id_token: 'idtoken:' + m[1] }) : res(400, { error: 'invalid_grant' });
+        }
+        if (/oauth2\/v2\.1\/verify$/.test(url)) {
+          const u = String(payload.id_token).replace('idtoken:', '');
+          return res(200, { sub: u, name: profiles[u] || '保護者' });
+        }
+        const gm = url.match(/\/group\/([^/]+)\/member\/([^/]+)$/);
+        if (gm) return members.has(gm[2]) ? res(200, { displayName: profiles[gm[2]] || '保護者' }) : res(404, { message: 'Not found' });
+        const m = url.match(/\/profile\/([^/]+)$/);
+        return res(200, m ? { displayName: profiles[m[1]] || '保護者' } : {});
       },
     },
     ContentService: { createTextOutput: (t) => ({ text: t }) },
@@ -151,7 +164,7 @@ function createGas(options) {
       createTemplateFromFile: (name) => {
         const t = {
           evaluate() {
-            const html = fs.readFileSync(path.join(SRC, name + '.html'), 'utf8').replace(/<\?!=\s*JSON\.stringify\(key\)\s*\?>/g, JSON.stringify(t.key));
+            const html = fs.readFileSync(path.join(SRC, name + '.html'), 'utf8').replace(/<\?!=\s*JSON\.stringify\((\w+)\)\s*\?>/g, (m, v) => JSON.stringify(t[v] === undefined ? '' : t[v]).replace(/</g, '\\u003c'));
             const out = { getContent: () => html, setTitle: () => out, addMetaTag: () => out };
             return out;
           },
@@ -171,6 +184,8 @@ function createGas(options) {
     calendar,
     fetches,
     profiles,
+    members,
+    cache,
     run: (src) => ctx.__run(src),
     sheet: (name) => { const ss = spreadsheets[props.SPREADSHEET_ID]; return ss && ss.getSheetByName(name); },
     rows: (name) => { const s = gas.sheet(name); return s ? s.rows() : []; },
@@ -180,6 +195,9 @@ function createGas(options) {
       props.CALENDAR_ID = 'club-calendar';
       props.WEBHOOK_TOKEN = 'hook';
       props.PHOTO_FOLDER_ID = 'folder';
+      props.GROUP_ID = 'G1';
+      props.LINE_LOGIN_CHANNEL_ID = 'login-channel';
+      props.LINE_LOGIN_CHANNEL_SECRET = 'login-secret';
       props.SPREADSHEET_ID = ctx.SpreadsheetApp.create('test').getId();
       ctx.__run('Object.keys(SHEETS).forEach((k) => sheet_(SHEETS[k]))');
     },
@@ -191,6 +209,15 @@ function createGas(options) {
       return fetches.slice(before).filter((f) => /reply$/.test(f.url)).map((f) => f.payload.messages.map((m) => m.text).join('\n')).join('\n');
     },
     pushes() { return fetches.filter((f) => /push$/.test(f.url)); },
+    /** LINE ログインして戻ってきたことにする。ポータルのキー（または null）とエラー文を返す */
+    login(userId) {
+      const html = ctx.doGet({ parameter: {} }).getContent();
+      const state = decodeURIComponent((html.match(/state=([A-Za-z0-9]+)/) || [])[1] || '');
+      const out = ctx.doGet({ parameter: { code: 'login:' + userId, state } }).getContent();
+      const key = JSON.parse(out.match(/var KEY = (".*?");/)[1]);
+      const error = JSON.parse(out.match(/var LOGIN_ERROR = (".*?");/)[1]);
+      return { key: key || null, error, html: out };
+    },
   };
   return gas;
 }

@@ -19,18 +19,19 @@ function setupClub() {
     .forEach((p) => gas.calendar.add({ title: '通常練習', start: jst(p[0] + 'T' + p[1] + ':00'), end: jst(p[0] + 'T' + p[2] + ':00'), location: p[3] }));
   gas.calendar.add({ title: '県小学生陸上競技大会', start: jst('2026-09-27T00:00:00'), end: jst('2026-09-28T00:00:00'), allDay: true, location: '県営陸上競技場' });
   gas.calendar.add({ title: '秋季記録会', start: jst('2026-11-01T00:00:00'), end: jst('2026-11-02T00:00:00'), allDay: true, location: '市営陸上競技場' });
-  Object.assign(gas.profiles, { U1: '山田', U2: '鈴木', U3: '佐藤' });
+  Object.assign(gas.profiles, { U1: '山田', U2: '鈴木', U3: '佐藤', X9: '部外者' });
+  ['U1', 'U2', 'U3'].forEach((u) => gas.members.add(u));
   const dm = (u) => ({ type: 'user', userId: u });
   gas.line(dm('U1'), '登録 山田たろう 3年 山田はなこ 1年');
   gas.line(dm('U2'), '登録 鈴木けんた 5年');
   gas.line(dm('U3'), '登録 佐藤さくら 4年');
-  const key = (u) => gas.line(dm(u), 'ポータル').match(/\?k=([A-Za-z0-9]+)/)[1];
-  const keys = { admin: key('U1'), parent: key('U2') };
+  gas.login('U1');
   gas.sheet('家族').data.forEach((r) => { if (r[0] === 'U1') r[3] = '○'; });
-  return { gas, keys };
+  return { gas, keys: { admin: 'U1', parent: 'U2' } };
 }
 
-async function openPortal(browser, gas, key, name) {
+// userId の人が LINE ログインして戻ってきた状態でポータルを開く（2回目以降の読み込みはログインなし）
+async function openPortal(browser, gas, userId, name) {
   const page = await browser.newPage({ viewport: { width: 420, height: 900 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -50,9 +51,14 @@ async function openPortal(browser, gas, key, name) {
     }
     window.google = { script: { get run() { return runner(); } } };
   });
-  await page.route('https://portal.test/**', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: gas.ctx.doGet({ parameter: { k: key } }).getContent() }));
+  let first = true;
+  await page.route('https://portal.test/**', (r) => {
+    const body = first && userId ? gas.login(userId).html : gas.ctx.doGet({ parameter: {} }).getContent();
+    first = false;
+    r.fulfill({ contentType: 'text/html; charset=utf-8', body });
+  });
   await page.goto('https://portal.test/');
-  await page.waitForSelector('#nav:not([hidden])');
+  if (userId) await page.waitForSelector('#nav:not([hidden])');
   page.errors = errors;
   page.shot = async (n) => { if (SHOTS) await page.screenshot({ path: path.join(shotDir, name + '-' + n + '.png'), fullPage: true }); };
   page.idle = () => page.waitForSelector('#busy[hidden]', { state: 'attached' });
@@ -180,6 +186,31 @@ async function openPortal(browser, gas, key, name) {
       await p.idle();
       assert.ok((await p.textContent('#view')).includes('集合時間の変更'));
       await p.shot('4-home');
+    });
+    await step('再読み込みしても、ログインしたまま開ける', async () => {
+      await p.reload();
+      await p.waitForSelector('#nav:not([hidden])');
+      assert.ok((await p.textContent('#me')).includes('鈴木'));
+    });
+    await step('ログアウトするとログイン画面に戻る', async () => {
+      await p.click('[data-nav="family"]');
+      await p.click('#logout');
+      assert.ok(await p.isVisible('#loginBtn'));
+      assert.ok((await p.getAttribute('#loginBtn', 'href')).startsWith('https://access.line.me/oauth2/v2.1/authorize?'));
+      await p.reload();
+      assert.ok(await p.isVisible('#loginBtn'), 'ログアウト後はキーが残っていない');
+      await p.shot('5-login');
+    });
+    await step('グループのメンバーでない人は入れない', async () => {
+      const x = await browser.newPage({ viewport: { width: 420, height: 900 } });
+      await x.route('https://portal.test/**', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: gas.login('X9').html }));
+      await x.route('**/fonts.googleapis.com/**', (r) => r.abort());
+      await x.goto('https://portal.test/');
+      await x.waitForSelector('#loginBtn');
+      assert.ok((await x.textContent('#view')).includes('メンバーだけが見られる'));
+      assert.ok(await x.isHidden('#nav'));
+      if (SHOTS) await x.screenshot({ path: path.join(shotDir, 'outsider.png') });
+      await x.close();
     });
     await step('画面のエラーなし', async () => {
       assert.deepStrictEqual(a.errors.concat(p.errors), []);
