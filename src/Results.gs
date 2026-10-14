@@ -13,7 +13,7 @@ function parseResultArgs_(args, myChildren) {
   } else if (myChildren.length === 1) {
     child = myChildren[0];
   } else if (myChildren.length === 0) {
-    return { error: 'お子さんの名前が未登録です。先に「登録 山田たろう」のように送ってください。' };
+    return { error: 'お子さんの名前が未登録です。先に「登録 山田たろう 3年」のように送ってください。' };
   } else {
     return { error: '誰の記録か分かるように、名前から書いてください。\n例：結果 ' + myChildren[0] + ' 100m 15.2秒' };
   }
@@ -37,8 +37,7 @@ function splitResultTokens_(args) {
 
 function handleResultCommand_(ev, args) {
   const userId = ev.source.userId;
-  const family = findFamily_(userId);
-  const parsed = parseResultArgs_(args, childrenOf_(family));
+  const parsed = parseResultArgs_(args, childrenOf_(userId).map((c) => c.name));
   if (parsed.error) return reply_(ev.replyToken, [text_(parsed.error)]);
 
   const event = recentEvent_(today_(), CONFIG.RESULT_EVENT_LOOKBACK_DAYS);
@@ -51,7 +50,7 @@ function handleResultCommand_(ev, args) {
     '記録': parsed.record,
     'メモ': parsed.note,
     userId: userId,
-    '表示名': family['表示名'],
+    '表示名': getDisplayName_(ev.source),
   });
 
   let msg = '🏃 記録しました：' + parsed.child + ' ' + parsed.item + ' ' + parsed.record;
@@ -73,7 +72,7 @@ function buildRecordsText_(child, results) {
 
 function handleRecordsCommand_(ev, args) {
   const names = splitNames_(args);
-  const targets = names.length ? names : childrenOf_(findFamily_(ev.source.userId));
+  const targets = names.length ? names : childrenOf_(ev.source.userId).map((c) => c.name);
   if (!targets.length) {
     return reply_(ev.replyToken, [text_('「記録 山田たろう」のように名前を書くか、先にお子さんを登録してください。')]);
   }

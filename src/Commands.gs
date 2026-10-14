@@ -1,15 +1,20 @@
-const HELP_TEXT = [
-  '🏃 陸上クラブBotの使い方',
-  '',
-  '登録 名前 … お子さんの名前を登録（きょうだいは「登録 たろう はなこ」）',
-  '予定 … これからの予定と出欠ボタンを表示',
-  '出欠 … 直近の予定の出欠一覧（未回答者も表示）',
-  '結果 種目 記録 … レース結果を記録（例：結果 100m 15.2秒）',
-  '記録 … お子さんの記録一覧',
-  '写真 … 保存した写真フォルダのリンク',
-  '',
-  '📷 グループに送った写真は自動でアルバム（Googleドライブ）に保存されます。',
-].join('\n');
+/** 使い方の文章（CONFIG を使うので、ファイルの読み込み順に左右されないよう関数にする） */
+function helpText_() {
+  return [
+    '🏃 ' + CONFIG.CLUB_NAME + ' Botの使い方',
+    '',
+    '【はじめに】Botを友だち追加して、1対1のトークで次を送ってください',
+    '登録 名前 学年 … お子さんを登録（例：登録 山田たろう 3年 山田はなこ 1年）',
+    'ポータル … 予定・大会のエントリー・休みの連絡ができる、あなた専用のページのリンク',
+    '',
+    '【グループでも使えます】',
+    '結果 種目 記録 … レース結果を記録（例：結果 100m 15.2秒）',
+    '記録 … お子さんの記録一覧',
+    '写真 … 保存した写真フォルダのリンク',
+    '',
+    '📷 グループに送った写真は自動でアルバム（Googleドライブ）に保存されます。',
+  ].join('\n');
+}
 
 /**
  * 1語目をコマンドとして解釈する。普段の会話に反応しないよう、
@@ -23,8 +28,8 @@ function parseCommand_(text) {
   const aliases = {
     'ヘルプ': 'help', '使い方': 'help', 'help': 'help',
     '登録': 'register',
-    '予定': 'events',
-    '出欠': 'tally',
+    'ポータル': 'portal', 'portal': 'portal',
+    '予定': 'portalHint', '出欠': 'portalHint', '休み': 'portalHint', 'エントリー': 'portalHint',
     '結果': 'result',
     '記録': 'records',
     '写真': 'photos', 'アルバム': 'photos',
@@ -39,13 +44,13 @@ function handleText_(ev) {
   if (!cmd) return;
   switch (cmd.name) {
     case 'help':
-      return reply_(ev.replyToken, [text_(HELP_TEXT)]);
+      return reply_(ev.replyToken, [text_(helpText_())]);
     case 'register':
       return handleRegister_(ev, cmd.args);
-    case 'events':
-      return handleEventsCommand_(ev);
-    case 'tally':
-      return handleTallyCommand_(ev);
+    case 'portal':
+      return handlePortal_(ev, cmd.args);
+    case 'portalHint':
+      return reply_(ev.replyToken, [text_('予定・大会のエントリー・休みの連絡は、ポータルからできます。\nBotとの1対1のトークで「ポータル」と送ると、あなた専用のリンクが届きます。')]);
     case 'result':
       return handleResultCommand_(ev, cmd.args);
     case 'records':
@@ -57,45 +62,40 @@ function handleText_(ev) {
 
 function handleRegister_(ev, args) {
   const userId = ev.source.userId;
-  const names = splitNames_(args);
-  if (!names.length) {
-    const children = childrenOf_(findFamily_(userId));
+  const list = parseChildrenArgs_(args);
+  if (!list.length) {
+    const children = childrenOf_(userId);
     return reply_(ev.replyToken, [
       text_(
         children.length
-          ? '登録中のお子さん：' + children.join('、') + '\n変更するときは「登録 名前」を送り直してください。'
-          : '「登録 山田たろう」のようにお子さんの名前を送ってください。'
+          ? '登録中のお子さん：' + children.map((c) => c.name + (c.grade ? '（' + c.grade + '年）' : '')).join('、') + '\n変更するときは「登録 名前 学年」を送り直すか、ポータルの「わが家」から直してください。'
+          : '「登録 山田たろう 3年」のように、お子さんの名前と学年を送ってください。'
       ),
     ]);
   }
-  saveFamily_(userId, getDisplayName_(ev.source), names);
-  reply_(ev.replyToken, [text_('登録しました：' + names.join('、'))]);
+  ensureFamily_(userId, getDisplayName_(ev.source));
+  saveChildren_(userId, list);
+  const noGrade = list.some((c) => !c.grade);
+  reply_(ev.replyToken, [
+    text_('登録しました：' + list.map((c) => c.name + (c.grade ? '（' + c.grade + '年）' : '')).join('、') + (noGrade ? '\n学年はポータルの「わが家」から入れられます。' : '') +
+      (ev.source.type === 'user' ? '\n続けて「ポータル」と送ると、専用ページのリンクが届きます。' : '')),
+  ]);
 }
 
-/** 係の人がさっき入れた予定も出るように、表示の前にカレンダーを同期する */
-function syncQuietly_() {
-  try {
-    syncCalendar_();
-  } catch (err) {
-    console.error(err && err.stack ? err.stack : err);
+/**
+ * 個人リンクはグループに出すと他の人にも使われてしまうので、1対1のトークでだけ返す。
+ * 「ポータル 再発行」でリンクを作り直せる（前のリンクは使えなくなる）。
+ */
+function handlePortal_(ev, args) {
+  if (ev.source.type !== 'user') {
+    return reply_(ev.replyToken, [text_('ポータルのリンクは、あなた専用です。\nBotを友だち追加して、1対1のトークで「ポータル」と送ってください。')]);
   }
-}
-
-function handleEventsCommand_(ev) {
-  syncQuietly_();
-  const events = upcomingEvents_(CONFIG.SYNC_DAYS_AHEAD);
-  if (!events.length) return reply_(ev.replyToken, [text_('これからの予定はまだ登録されていません。')]);
-  reply_(ev.replyToken, [eventsCarousel_(events, 'これからの予定')]);
-}
-
-function handleTallyCommand_(ev) {
-  syncQuietly_();
-  const events = upcomingEvents_(CONFIG.ANNOUNCE_DAYS_AHEAD);
-  if (!events.length) return reply_(ev.replyToken, [text_(CONFIG.ANNOUNCE_DAYS_AHEAD + '日以内の予定はありません。')]);
-  const children = allChildren_();
-  const attendance = readRows_(SHEETS.ATTENDANCE);
-  reply_(
-    ev.replyToken,
-    events.slice(0, 5).map((e) => text_(buildTallyText_(e, attendance.filter((a) => a.eventKey === e.eventKey), children)))
-  );
+  const renew = /再発行|新しく|作り直/.test(args);
+  const key = portalKeyFor_(ev.source.userId, getDisplayName_(ev.source), renew);
+  const hasChildren = childrenOf_(ev.source.userId).length > 0;
+  reply_(ev.replyToken, [
+    text_((renew ? '新しいリンクを作りました。前のリンクは使えなくなりました。\n\n' : '') +
+      '🏃 ' + CONFIG.CLUB_NAME + ' ポータル（あなた専用）\n' + portalUrl_(key) +
+      '\n\n※このリンクは他の人に教えないでください。' + (hasChildren ? '' : '\n※先に「登録 名前 学年」でお子さんを登録してください。')),
+  ]);
 }

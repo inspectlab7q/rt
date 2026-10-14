@@ -8,6 +8,17 @@ function eventKey_(calEvent) {
   return md5Hex_(base).slice(0, 12);
 }
 
+function calendar_() {
+  const calendar = CalendarApp.getCalendarById(requireProp_('CALENDAR_ID'));
+  if (!calendar) throw new Error('カレンダーが見つかりません。CALENDAR_ID と共有設定を確認してください');
+  return calendar;
+}
+
+/** 予定名から種別を判断する */
+function guessType_(title) {
+  return CONFIG.RACE_KEYWORDS.test(title) ? '大会' : '練習';
+}
+
 function calEventToRow_(ce) {
   const allDay = ce.isAllDayEvent();
   return {
@@ -23,54 +34,80 @@ function calEventToRow_(ce) {
 
 const EVENT_FIELDS = ['日付', '開始', '終了', 'タイトル', '場所'];
 
-/**
- * Google カレンダーの予定を「予定」シートに取り込む。
- * 案内済みの予定が変更・削除された場合はそのリストを返す（グループへのお知らせ用）。
- */
-function syncCalendar_() {
-  const calendar = CalendarApp.getCalendarById(requireProp_('CALENDAR_ID'));
-  if (!calendar) throw new Error('カレンダーが見つかりません。CALENDAR_ID と共有設定を確認してください');
-
+function syncRange_() {
   const today = today_();
-  const lastDay = addDays_(today, CONFIG.SYNC_DAYS_AHEAD);
-  const start = new Date(today + 'T00:00:00+09:00');
-  const end = new Date(addDays_(lastDay, 1) + 'T00:00:00+09:00');
+  const first = addDays_(today, -CONFIG.SYNC_DAYS_BEFORE);
+  const last = addDays_(today, CONFIG.SYNC_DAYS_AHEAD);
+  return { first: first, last: last, start: new Date(first + 'T00:00:00+09:00'), end: new Date(addDays_(last, 1) + 'T00:00:00+09:00') };
+}
 
-  const rows = readRows_(SHEETS.EVENTS);
-  const byKey = {};
-  rows.forEach((r) => (byKey[r.eventKey] = r));
+/** Google カレンダーの予定を「予定」シートに取り込む */
+function syncCalendar_() {
+  const range = syncRange_();
+  return withLock_(() => {
+    const rows = readRows_(SHEETS.EVENTS);
+    const byKey = {};
+    rows.forEach((r) => (byKey[r.eventKey] = r));
+    const seen = {};
 
-  const changed = [];
-  const cancelled = [];
-  const seen = {};
+    calendar_().getEvents(range.start, range.end).forEach((ce) => {
+      const data = calEventToRow_(ce);
+      seen[data.eventKey] = true;
+      const row = byKey[data.eventKey];
+      if (!row) {
+        appendRow_(SHEETS.EVENTS, Object.assign(data, { '種別': guessType_(data['タイトル']), '状態': '予定', '更新日時': now_() }));
+        return;
+      }
+      const changed = EVENT_FIELDS.some((f) => row[f] !== data[f]);
+      if (!changed && row['状態'] !== '中止') return;
+      Object.assign(row, data, { '状態': '予定', '更新日時': now_() });
+      if (!row['種別']) row['種別'] = guessType_(row['タイトル']);
+      updateRow_(SHEETS.EVENTS, row);
+    });
 
-  calendar.getEvents(start, end).forEach((ce) => {
-    const data = calEventToRow_(ce);
-    seen[data.eventKey] = true;
-    const row = byKey[data.eventKey];
-    if (!row) {
-      appendRow_(SHEETS.EVENTS, Object.assign(data, { '状態': '予定', '更新日時': now_() }));
-      return;
+    // 期間内なのにカレンダーから消えた予定は中止扱い
+    rows.forEach((r) => {
+      if (seen[r.eventKey] || r['状態'] === '中止') return;
+      if (r['日付'] < range.first || r['日付'] > range.last) return;
+      r['状態'] = '中止';
+      r['更新日時'] = now_();
+      updateRow_(SHEETS.EVENTS, r);
+    });
+    setProp_('LAST_SYNC', String(Date.now()));
+  });
+}
+
+/** 前回の同期から時間がたっていればカレンダーを読み直す */
+function syncIfStale_() {
+  const last = Number(prop_('LAST_SYNC') || 0);
+  if (Date.now() - last < CONFIG.SYNC_INTERVAL_MINUTES * 60000) return;
+  try {
+    syncCalendar_();
+  } catch (err) {
+    console.error(err && err.stack ? err.stack : err);
+  }
+}
+
+/**
+ * ポータルで作った・直した大会をカレンダーにも反映し、「予定」シートの行を返す。
+ * 大会はカレンダーでは終日の予定にする（集合時刻などはポータル側で持つ）。
+ */
+function upsertRaceEvent_(eventKey, title, date, place) {
+  const cal = calendar_();
+  const d = new Date(date + 'T00:00:00+09:00');
+  let row = eventKey ? findEvent_(eventKey) : null;
+  if (row) {
+    const ce = cal.getEventById(row['カレンダーID']);
+    if (ce && !ce.isRecurringEvent()) {
+      ce.setTitle(title);
+      ce.setLocation(place || '');
+      ce.setAllDayDate(d);
     }
-    const diff = EVENT_FIELDS.some((f) => row[f] !== data[f]);
-    if (!diff && row['状態'] !== '中止') return;
-    if (row['案内済み'] && diff) changed.push(Object.assign({}, row, data));
-    // 日時が変わったらリマインドをやり直す
-    const resetRemind = row['日付'] !== data['日付'];
-    Object.assign(row, data, { '状態': '予定', '更新日時': now_() });
-    if (resetRemind) row['リマインド済み'] = '';
+    Object.assign(row, { '日付': date, '開始': '終日', '終了': '', 'タイトル': title, '場所': place || '', '種別': '大会', '状態': '予定', '更新日時': now_() });
     updateRow_(SHEETS.EVENTS, row);
-  });
-
-  // 期間内なのにカレンダーから消えた予定は中止扱い
-  rows.forEach((r) => {
-    if (seen[r.eventKey] || r['状態'] === '中止') return;
-    if (r['日付'] < today || r['日付'] > lastDay) return;
-    r['状態'] = '中止';
-    r['更新日時'] = now_();
-    updateRow_(SHEETS.EVENTS, r);
-    if (r['案内済み']) cancelled.push(r);
-  });
-
-  return { changed: changed, cancelled: cancelled };
+    return row;
+  }
+  const ce = cal.createAllDayEvent(title, d, { location: place || '' });
+  const data = calEventToRow_(ce);
+  return appendRow_(SHEETS.EVENTS, Object.assign(data, { '種別': '大会', '状態': '予定', '更新日時': now_() }));
 }

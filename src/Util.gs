@@ -75,3 +75,27 @@ function md5Hex_(s) {
     .map((b) => ('0' + (b & 0xff).toString(16)).slice(-2))
     .join('');
 }
+
+/** ポータルの個人リンク用のキー（英数字32文字） */
+function randomKey_() {
+  return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').slice(0, 32);
+}
+
+/**
+ * 「たろう 3年 はなこ 1年」「たろう3年、はなこ」などを子どもの一覧にする。学年は省略できる。
+ * @return {{name: string, grade: number}[]}
+ */
+function parseChildrenArgs_(s) {
+  const out = [];
+  splitNames_(toHalfWidth_(s)).forEach((token) => {
+    const onlyGrade = token.match(/^([1-6])年?生?$/);
+    if (onlyGrade) {
+      if (out.length && !out[out.length - 1].grade) out[out.length - 1].grade = Number(onlyGrade[1]);
+      return;
+    }
+    const withGrade = token.match(/^(.+?)[(（]?([1-6])年生?[)）]?$/);
+    if (withGrade) out.push({ name: withGrade[1], grade: Number(withGrade[2]) });
+    else out.push({ name: token, grade: 0 });
+  });
+  return out;
+}
