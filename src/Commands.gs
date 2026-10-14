@@ -72,13 +72,24 @@ function handleRegister_(ev, args) {
   reply_(ev.replyToken, [text_('登録しました：' + names.join('、'))]);
 }
 
+/** 係の人がさっき入れた予定も出るように、表示の前にカレンダーを同期する */
+function syncQuietly_() {
+  try {
+    syncCalendar_();
+  } catch (err) {
+    console.error(err && err.stack ? err.stack : err);
+  }
+}
+
 function handleEventsCommand_(ev) {
+  syncQuietly_();
   const events = upcomingEvents_(CONFIG.SYNC_DAYS_AHEAD);
   if (!events.length) return reply_(ev.replyToken, [text_('これからの予定はまだ登録されていません。')]);
   reply_(ev.replyToken, [eventsCarousel_(events, 'これからの予定')]);
 }
 
 function handleTallyCommand_(ev) {
+  syncQuietly_();
   const events = upcomingEvents_(CONFIG.ANNOUNCE_DAYS_AHEAD);
   if (!events.length) return reply_(ev.replyToken, [text_(CONFIG.ANNOUNCE_DAYS_AHEAD + '日以内の予定はありません。')]);
   const children = allChildren_();

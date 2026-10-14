@@ -56,12 +56,14 @@ function handleEvent_(ev) {
 }
 
 /**
- * 毎朝トリガーで実行：カレンダー同期 → 変更・中止のお知らせ → 新しい予定の案内 → 未回答リマインド。
+ * 毎朝トリガーで実行：カレンダー同期。
+ * AUTO_PUSH がオンのときだけ、変更・中止のお知らせ → 新しい予定の案内 → 未回答リマインドを流す。
  * プッシュメッセージは無料枠の通数を使うので、送る内容を1回のリクエストにまとめる。
  */
 function dailyJob() {
-  const groupId = prop_('GROUP_ID');
   const sync = syncCalendar_();
+  if (!CONFIG.AUTO_PUSH) return;
+  const groupId = prop_('GROUP_ID');
   if (!groupId) {
     console.warn('GROUP_ID が未設定です。Bot をグループに招待してください');
     return;
