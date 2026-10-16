@@ -7,10 +7,16 @@
  * 練習の時間を変えたら、もう一度実行すれば入れ直せる。
  */
 
-// 練習の時間。夏（IMPORT_SUMMER の期間）とそれ以外（秋〜春）で分ける。土曜も同じ時間で登録する
+// 平日（火・木）の練習時間。夏（IMPORT_SUMMER の期間）とそれ以外（秋〜春）で分ける
 const IMPORT_PRACTICE_TIME = { summer: ['18:00', '19:30'], other: ['17:00', '18:30'] };
 const IMPORT_SUMMER = { from: '06-01', to: '09-30' }; // 月-日
+// 土曜は日によって違うので「終日」で入れる。時間が分かっている日はここに書く
+// 例）'2026-10-17': ['09:00', '11:00'],
+const IMPORT_SATURDAY_TIME = {
+};
+// null を返すと「終日」で登録する
 function importPracticeTime_(date) {
+  if (new Date(date + 'T00:00:00Z').getUTCDay() === 6) return IMPORT_SATURDAY_TIME[date] || null;
   const md = date.slice(5);
   return md >= IMPORT_SUMMER.from && md <= IMPORT_SUMMER.to ? IMPORT_PRACTICE_TIME.summer : IMPORT_PRACTICE_TIME.other;
 }
@@ -55,9 +61,13 @@ function importSchedule() {
     const date = p[0], duty = p[1];
     const time = importPracticeTime_(date);
     const day = new Date(date + 'T00:00:00+09:00');
-    const desc = '当番：' + duty + '\n' + IMPORT_TAG;
+    const isSat = new Date(date + 'T00:00:00Z').getUTCDay() === 6;
+    const desc = '当番：' + duty + (isSat && !time ? '\n時間は日によって違います。役員からの案内を見てください' : '') + '\n' + IMPORT_TAG;
     const existing = cal.getEventsForDay(day).find(function (e) { return e.getDescription().indexOf(IMPORT_TAG) >= 0 && e.getTitle() === '練習'; });
-    if (time) {
+    // 土曜の時間を、カレンダーで直接直した場合は上書きしない
+    if (existing && isSat && !time) {
+      existing.setLocation(IMPORT_PRACTICE_PLACE).setDescription(desc);
+    } else if (time) {
       const start = new Date(date + 'T' + time[0] + ':00+09:00');
       const end = new Date(date + 'T' + time[1] + ':00+09:00');
       if (existing) existing.setTime(start, end).setLocation(IMPORT_PRACTICE_PLACE).setDescription(desc);
