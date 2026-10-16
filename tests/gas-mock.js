@@ -157,7 +157,7 @@ function createGas(options) {
         return res(200, m ? { displayName: profiles[m[1]] || '保護者' } : {});
       },
     },
-    ContentService: { createTextOutput: (t) => ({ text: t }) },
+    ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (t) => { const o = { text: t, setMimeType: () => o }; return o; } },
     ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/TEST/exec' }) },
     Session: { getActiveUser: () => ({ getEmail: () => '' }), getEffectiveUser: () => ({ getEmail: () => 'club@example.com' }) },
     HtmlService: {

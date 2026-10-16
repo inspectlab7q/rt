@@ -17,7 +17,8 @@ function doGet(e) {
   const t = HtmlService.createTemplateFromFile('Portal');
   t.key = key;
   t.error = error;
-  t.login = loginUrl_();
+  t.login = loginUrl_(ScriptApp.getService().getUrl());
+  t.apiUrl = '';
   t.home = ScriptApp.getService().getUrl();
   t.club = CONFIG.CLUB_NAME;
   return t.evaluate()
@@ -26,12 +27,15 @@ function doGet(e) {
 }
 
 /**
- * LINE からの Webhook を受け取る。
- * Apps Script ではリクエストヘッダー（署名）を読めないため、
- * Webhook URL に付けた ?token=... が一致するリクエストだけを処理する。
+ * POST を受け取る。
+ *   ?token=… 付き … LINE からの Webhook。Apps Script ではリクエストヘッダー（署名）を読めないため、
+ *                    Webhook URL に付けた token が一致するリクエストだけを処理する
+ *   token なし   … GitHub Pages のポータル画面からの操作（apiPost_）
  */
 function doPost(e) {
-  if (!e || !e.parameter || e.parameter.token !== prop_('WEBHOOK_TOKEN')) return ok_();
+  const p = (e && e.parameter) || {};
+  if (p.token === undefined) return apiPost_(e);
+  if (p.token !== prop_('WEBHOOK_TOKEN')) return ok_();
   const body = JSON.parse(e.postData.contents);
   (body.events || []).forEach((ev) => {
     try {
@@ -46,6 +50,28 @@ function doPost(e) {
 
 function ok_() {
   return ContentService.createTextOutput('OK');
+}
+
+/**
+ * GitHub Pages のポータル画面からの操作。本文は {action, key, payload} の JSON。
+ * 返事は {ok: …} か {error: '…'}。
+ */
+function apiPost_(e) {
+  let out;
+  try {
+    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (body.action === 'loginUrl') {
+      out = { ok: { url: loginUrl_(portalUrl_()) } };
+    } else if (body.action === 'login') {
+      const r = handleLoginCallback_(String((body.payload || {}).code || ''), String((body.payload || {}).state || ''));
+      out = r.key ? { ok: { key: r.key } } : { error: r.error };
+    } else {
+      out = { ok: api(body.key, body.action, body.payload) };
+    }
+  } catch (err) {
+    out = { error: String((err && err.message) || err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 
 /** LINE の再送で同じイベントを二重に処理しないようにする */

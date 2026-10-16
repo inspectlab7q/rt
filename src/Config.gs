@@ -16,6 +16,10 @@ const CONFIG = {
   TIMEZONE: 'Asia/Tokyo',
   CLUB_NAME: '河北SS',
 
+  // ポータルの画面の場所（例：GitHub Pages の https://inspectlab7q.github.io/rt/）。
+  // 空のときは Apps Script のウェブアプリの画面を使う
+  PORTAL_URL: '',
+
   // カレンダーから取り込む範囲（今日から何日前〜何日先まで）
   SYNC_DAYS_BEFORE: 60,
   SYNC_DAYS_AHEAD: 180,

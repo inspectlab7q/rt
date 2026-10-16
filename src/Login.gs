@@ -16,14 +16,17 @@ const LINE_AUTH_URL = 'https://access.line.me/oauth2/v2.1/authorize';
 const LINE_TOKEN_URL = 'https://api.line.me/oauth2/v2.1/token';
 const LINE_VERIFY_URL = 'https://api.line.me/oauth2/v2.1/verify';
 
-/** LINE ログイン画面への URL。state は使い捨てで10分だけ有効 */
-function loginUrl_() {
+/**
+ * LINE ログイン画面への URL。state は使い捨てで10分だけ有効。
+ * redirectUri はログイン後に戻る画面（GitHub Pages か、Apps Script のウェブアプリ）。
+ */
+function loginUrl_(redirectUri) {
   const state = randomKey_();
-  CacheService.getScriptCache().put('login:' + state, '1', 600);
+  CacheService.getScriptCache().put('login:' + state, redirectUri, 600);
   return LINE_AUTH_URL + '?' + buildQuery_({
     response_type: 'code',
     client_id: requireProp_('LINE_LOGIN_CHANNEL_ID'),
-    redirect_uri: ScriptApp.getService().getUrl(),
+    redirect_uri: redirectUri,
     state: state,
     scope: 'profile openid',
   });
@@ -43,14 +46,15 @@ function postForm_(url, form) {
  */
 function handleLoginCallback_(code, state) {
   const cache = CacheService.getScriptCache();
-  if (!state || !cache.get('login:' + state)) return { error: 'ログインの有効期限が切れました。もう一度「LINEでログイン」を押してください。' };
+  const redirectUri = state ? cache.get('login:' + state) : null;
+  if (!redirectUri) return { error: 'ログインの有効期限が切れました。もう一度「LINEでログイン」を押してください。' };
   cache.remove('login:' + state);
   let profile;
   try {
     const token = postForm_(LINE_TOKEN_URL, {
       grant_type: 'authorization_code',
       code: code,
-      redirect_uri: ScriptApp.getService().getUrl(),
+      redirect_uri: redirectUri,
       client_id: requireProp_('LINE_LOGIN_CHANNEL_ID'),
       client_secret: requireProp_('LINE_LOGIN_CHANNEL_SECRET'),
     });
@@ -112,5 +116,5 @@ function ensureMember_(family) {
 
 /** グループのメンバーにだけ出す共通のリンク */
 function portalUrl_() {
-  return ScriptApp.getService().getUrl();
+  return CONFIG.PORTAL_URL || ScriptApp.getService().getUrl();
 }

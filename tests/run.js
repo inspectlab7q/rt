@@ -184,6 +184,21 @@ test('ポータル画面: URLに付けたキーでは開けない（ログイン
   assert.ok(html.includes('access.line.me/oauth2/v2.1/authorize'));
 });
 
+test('ポータル画面（別の場所に置いた画面）からのPOSTでログインと操作ができる', () => {
+  const gas = setupClub();
+  const post = (body) => JSON.parse(gas.ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify(body) } }).text);
+  const url = post({ action: 'loginUrl' }).ok.url;
+  const state = url.match(/state=([A-Za-z0-9]+)/)[1];
+  assert.ok(url.includes('redirect_uri=' + encodeURIComponent('https://script.google.com/macros/s/TEST/exec')));
+  const login = post({ action: 'login', payload: { code: 'login:U2', state } });
+  assert.ok(login.ok && login.ok.key, JSON.stringify(login));
+  const st = post({ action: 'bootstrap', key: login.ok.key });
+  assert.strictEqual(st.ok.me.name, '鈴木');
+  assert.ok(post({ action: 'bootstrap', key: 'B'.repeat(32) }).error.includes('ログインが切れ'));
+  assert.ok(post({ action: 'login', payload: { code: 'login:U2', state } }).error.includes('有効期限'), 'state は使い捨て');
+  assert.strictEqual(gas.ctx.doPost({ parameter: { token: 'wrong' }, postData: { contents: '{}' } }).text, 'OK', 'token付きはLINEの受付として扱う');
+});
+
 test('管理用の関数はWebアプリからは動かない', () => {
   const gas = setupClub();
   assert.throws(() => gas.ctx.setup(), /持ち主/);
