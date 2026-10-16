@@ -4,12 +4,16 @@
  * 使い方：Apps Script に「当番表取り込み」というスクリプトを作ってこれを貼り、
  *         関数「importSchedule」を選んで実行する。
  * 何回実行しても重複しない（同じ日の同じ予定は上書きする）。
- * 練習の時間が決まったら IMPORT_PRACTICE_TIME を書き換えてもう一度実行すれば、時間が入る。
+ * 練習の時間を変えたら、もう一度実行すれば入れ直せる。
  */
 
-// 練習の時間（曜日ごと）。null のままだと「終日」で登録する
-const IMPORT_PRACTICE_TIME = { '火': null, '木': null, '土': null };
-// 例）const IMPORT_PRACTICE_TIME = { '火': ['18:00', '20:00'], '木': ['18:00', '20:00'], '土': ['09:00', '11:00'] };
+// 練習の時間。夏（IMPORT_SUMMER の期間）とそれ以外（秋〜春）で分ける。土曜も同じ時間で登録する
+const IMPORT_PRACTICE_TIME = { summer: ['18:00', '19:30'], other: ['17:00', '18:30'] };
+const IMPORT_SUMMER = { from: '06-01', to: '09-30' }; // 月-日
+function importPracticeTime_(date) {
+  const md = date.slice(5);
+  return md >= IMPORT_SUMMER.from && md <= IMPORT_SUMMER.to ? IMPORT_PRACTICE_TIME.summer : IMPORT_PRACTICE_TIME.other;
+}
 const IMPORT_PRACTICE_PLACE = '河北小学校 体育館';
 const IMPORT_TAG = '#当番表から登録';
 
@@ -49,8 +53,7 @@ function importSchedule() {
   // 1. 練習をカレンダーに入れる
   IMPORT_PRACTICES.forEach(function (p) {
     const date = p[0], duty = p[1];
-    const wd = '日月火水木金土'[new Date(date + 'T00:00:00Z').getUTCDay()];
-    const time = IMPORT_PRACTICE_TIME[wd];
+    const time = importPracticeTime_(date);
     const day = new Date(date + 'T00:00:00+09:00');
     const desc = '当番：' + duty + '\n' + IMPORT_TAG;
     const existing = cal.getEventsForDay(day).find(function (e) { return e.getDescription().indexOf(IMPORT_TAG) >= 0 && e.getTitle() === '練習'; });
